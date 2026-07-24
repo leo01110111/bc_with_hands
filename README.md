@@ -20,24 +20,27 @@ make level LEVEL=4      # run just one level
 ```
 teacher/wuji_hands/   the simulation, the scripted expert, demo collection
 teacher/katas/        the level definitions and the check runner
-data/                 generated demonstrations (make demos)
-student  ->           symlink to your own repo; never lives in here
+student/wuji_bc/      the worksheets -- the six files you fill in
+data/                 generated demonstrations (make demos, gitignored)
 ```
 
-Everything under `teacher/` is scaffolding — read it if you want, but you are
-never asked to change it. The code you write lives in a **separate repo** so
-this one stays free of solutions and your history stays yours:
+The split is the point. Everything under `teacher/` is scaffolding: read it if
+you want, but you are never asked to change it, and it contains no solutions.
+Everything under `student/` is yours.
 
 ```bash
 git clone git@github.com:leo01110111/bc_with_hands.git
-ln -s /path/to/your/wuji_bc student          # must contain a wuji_bc/ package
-make demos N=1500                            # ~5 min, writes data/
+cd bc_with_hands
+make demos N=1500        # ~5 min, generates data/leap_lift_demos.npz
 make check
 ```
 
-`make check STUDENT=/path/to/your/wuji_bc` works too if you would rather not
-have a symlink. The runner imports `wuji_bc.data`, `wuji_bc.flow`, and so on
-from there — six modules in all, one per file in the ladder table below.
+The runner imports `wuji_bc.data`, `wuji_bc.flow` and so on out of `student/`.
+Point it somewhere else with `make check STUDENT=/path/to/another/checkout` if
+you want to keep several attempts side by side.
+
+Nothing else lives here — no vendored dependencies, no checkpoints, no data.
+Just the kata.
 
 ## The ladder
 
