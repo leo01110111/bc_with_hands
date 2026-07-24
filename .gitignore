@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+
+# machine-local: symlink to your own solutions repo
+/student
+
+# generated: `make demos N=1500`
+/data/
+*.npz
+*.mp4
+
+.venv/

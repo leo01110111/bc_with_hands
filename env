@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Activate the project's uv virtual environment.
+#
+# Running `./env` launches a new shell with the venv active (exit/Ctrl-D leaves it).
+# Or use `source ./env` to activate it in your current shell.
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ACTIVATE="$DIR/.venv/bin/activate"
+
+if [[ ! -f "$ACTIVATE" ]]; then
+    echo "No virtualenv found at $DIR/.venv — run 'uv venv' first." >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+# Sourced: activate directly in the caller's shell.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    source "$ACTIVATE"
+    return 0
+fi
+
+# Executed as ./env: spawn an interactive subshell with the venv active.
+source "$ACTIVATE"
+exec "${SHELL:-bash}" -i
