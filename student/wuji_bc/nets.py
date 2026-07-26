@@ -23,5 +23,10 @@ class VelocityMLP(nn.Module):
         t            (B, 1)            time in [0, 1]
         ->           (B, action_dim)   velocity
         """
-        # TODO(L03)
-        return None
+        input = jnp.concat([observations, x_t, t], axis=-1)
+        x = nn.Dense(self.hidden_dims[0])(input)
+        x = nn.relu(x)
+        x = nn.Dense(self.hidden_dims[1])(x)
+        x = nn.relu(x)
+        x = nn.Dense(self.action_dim)(x)
+        return x

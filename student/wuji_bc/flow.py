@@ -14,9 +14,17 @@ def get_flow_targets(actions, rng):
 
     Returns (x_t, v_target, t).
     """
-    # TODO(L04)
-    return None
+    key1, key2 = jax.random.split(rng)
+    
+    x_0 = jax.random.normal(key1, actions.shape)
+    
+    t = jax.random.uniform(key2, (actions.shape[0], 1))
+    
+    x_t = (1 - t) * x_0 + t * actions
 
+    v_target = actions - x_0
+    
+    return (x_t, v_target, t) 
 
 def flow_bc_loss(params, apply_fn, batch, rng):
     """E || v_theta(obs, x_t, t) - (x_1 - x_0) ||^2, as a scalar.
@@ -24,8 +32,13 @@ def flow_bc_loss(params, apply_fn, batch, rng):
     `apply_fn(params, observations, x_t, t) -> velocity`
     Return either `loss` or `(loss, info_dict)`.
     """
-    # TODO(L05)
-    return None
+    actions = batch['actions']
+
+    x_t, v_target, t = get_flow_targets(actions, rng)
+
+    loss = (jnp.mean(apply_fn(params, batch['observations'], x_t, t) - v_target, axis=0))**2
+    
+    return loss
 
 
 def sample_actions(params, apply_fn, observations, rng, flow_steps, act_dim, noises=None):

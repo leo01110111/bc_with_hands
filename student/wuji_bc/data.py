@@ -15,10 +15,11 @@ def load_demos(path: str) -> dict:
         terminals    (N,)    bool
         episode_ids  (N,)    int32
     """
-    np.open("data/leap")
-    # TODO(L01)
-    return None
+    demos = np.load(path)
+    return demos
 
+import jax
+import jax.numpy as jnp
 
 def sample_batch(dataset: dict, rng, batch_size: int) -> dict:
     """Draw `batch_size` random transitions.
@@ -26,8 +27,13 @@ def sample_batch(dataset: dict, rng, batch_size: int) -> dict:
     `rng` is a jax PRNGKey. Every array in the batch must be indexed with the
     SAME index vector, or your observations and actions will not correspond.
     """
-    # TODO(L01)
-    return None
+    N = next(iter(dataset.values())).shape[0] #the trajectory size
+    random_sample = jax.random.randint(rng, (batch_size), 0, N)
+    subset = dict()
+    for key, _ in dataset.items():
+        subset[key] = dataset[key][random_sample]
+
+    return subset
 
 
 class Normalizer:
@@ -40,13 +46,16 @@ class Normalizer:
     @classmethod
     def fit(cls, x) -> "Normalizer":
         """Compute per-dimension statistics from x of shape (N, D)."""
-        # TODO(L02) -- careful: some obs dims never vary
-        return None
+        mean = jnp.mean(x, axis=0)
+        std = jnp.sqrt(jnp.var(x, axis=0))
+        return Normalizer(mean, std)
 
     def normalize(self, x):
-        # TODO(L02)
-        raise NotImplementedError
+        return (x-self.mean)/self.std
 
     def denormalize(self, z):
-        # TODO(L02)
-        raise NotImplementedError
+        return self.std * z + self.mean
+
+
+if __name__ == "__main__":
+    load_demos("data/leap_lift_demos.npz")
