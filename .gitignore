@@ -1,13 +1,3 @@
 __pycache__/
 *.pyc
 
-# training artifacts
-checkpoints/
-*.pkl
-
-# generated: `make demos N=1500`
-/data/
-*.npz
-*.mp4
-
-.venv/
