@@ -1,5 +1,5 @@
-PY      := /home/leo/OGPO/.venv/bin/python
 ROOT    := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+PY      := $(ROOT)/.venv/bin/python
 
 ## your repo -- `student` is a symlink to it; override with
 ##   make check STUDENT=/path/to/wuji_bc

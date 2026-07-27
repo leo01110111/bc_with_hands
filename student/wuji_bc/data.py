@@ -7,7 +7,7 @@ import numpy as np
 
 
 def load_demos(path: str) -> dict:
-    """Load the .npz demo file into a dict of arrays.
+    """Load the .npz demo file into a dict of Jax arrays.
 
     Returns a dict with at least:
         observations (N, 32) float32
@@ -16,6 +16,7 @@ def load_demos(path: str) -> dict:
         episode_ids  (N,)    int32
     """
     demos = np.load(path)
+    demos = {k: jnp.asarray(v) for k, v in demos.items()}
     return demos
 
 import jax

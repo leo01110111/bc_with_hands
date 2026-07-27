@@ -36,11 +36,24 @@ def flow_bc_loss(params, apply_fn, batch, rng):
 
     x_t, v_target, t = get_flow_targets(actions, rng)
 
-    loss = (jnp.mean(apply_fn(params, batch['observations'], x_t, t) - v_target, axis=0))**2
+    loss = jnp.mean((apply_fn(params, batch['observations'], x_t, t) - v_target)**2, axis=(0,1))
     
     return loss
 
+if __name__ == "__main__":
+    rng = jax.random.PRNGKey(1)
+    rng, actions_key, obs_key = jax.random.split(rng, 3)
 
+    params = None
+    apply_fn = lambda params, observations, x_t, t: x_t
+
+    batch = {
+        'actions': jax.random.normal(actions_key, (2, 3)),
+        'observations': jax.random.normal(obs_key, (2, 4)),
+    }
+
+    print(flow_bc_loss(params, apply_fn, batch, rng))
+    
 def sample_actions(params, apply_fn, observations, rng, flow_steps, act_dim, noises=None):
     """Integrate the learned velocity field from noise to an action.
 
@@ -50,5 +63,9 @@ def sample_actions(params, apply_fn, observations, rng, flow_steps, act_dim, noi
             x <- x + apply_fn(params, obs, x, t) * (1 / flow_steps)
         return clip(x, -1, 1)
     """
-    # TODO(L07)
-    return None
+    x = jax.random.normal(rng, (observations.shape[0], act_dim))
+    x = noises if noises is not None else jax.random.normal(rng, (observations.shape[0], act_dim))
+    for i in range(flow_steps):
+        t = jnp.full((x.shape[0],1), i/flow_steps)
+        x = x + apply_fn(params, observations, x, t) * (1 / flow_steps)
+    return jnp.clip(x, -1, 1)
