@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import flax.serialization as fs
 
-from .nets import VelocityMLP
+from .nets import make_net
 from .data import MinMaxNormalizer
 from .flow import sample_actions
 
@@ -33,7 +33,7 @@ def load_policy(checkpoint_file=CKPT_FILE):
     horizon = int(ckpt.get("horizon", 1))     # checkpoints predating chunking
     params = ckpt["params"]
 
-    model = VelocityMLP(act_dim)
+    model = make_net(ckpt.get("arch", "mlp"), act_dim)   # checkpoints predating adaln
 
     def apply_fn(p, obs, x_t, t):
         return model.apply({"params": p}, obs, x_t, t)

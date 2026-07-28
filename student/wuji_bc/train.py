@@ -93,7 +93,7 @@ def train(steps: int = 40_000, eval_interval: int = 1000, batch_size: int = 256,
     obs_dim = train_set['observations'].shape[-1]
     act_dim = train_set['actions'].shape[-1]
     rng, key2 = jax.random.split(rng)
-    state = create_train_state(key2, obs_dim=obs_dim, act_dim=act_dim, lr=3e-4)
+    state = create_train_state(key2, obs_dim=obs_dim, act_dim=act_dim, lr=3e-4, arch=arch)
 
     rng, val_key, val_batch_key = jax.random.split(rng, 3)
     val_batch = sample_batch(val_set, val_batch_key, batch_size)
@@ -136,6 +136,7 @@ def train(steps: int = 40_000, eval_interval: int = 1000, batch_size: int = 256,
         'obs_dim': np.int32(obs_dim),
         'act_dim': np.int32(act_dim),      # H * env action dim
         'horizon': np.int32(horizon),
+        'arch': arch,
     }))
 
     if run is not None:
