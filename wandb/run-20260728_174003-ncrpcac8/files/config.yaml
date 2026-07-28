@@ -1,0 +1,71 @@
+_wandb:
+    value:
+        cli_version: 0.28.1
+        e:
+            nvbyz3h3i51w7a2qixue1y58hmjzbx05:
+                cpu_count: 64
+                cpu_count_logical: 128
+                cudaVersion: "13.2"
+                disk:
+                    /:
+                        total: "52521566208"
+                        used: "13731606528"
+                email: leokswang@gmail.com
+                executable: /home/leo/wuji-hands/.venv/bin/python
+                git:
+                    commit: 9f844bef7eaeaa128019b7dca19c7507e86b32f0
+                    remote: git@github.com:leo01110111/bc_with_hands.git
+                gpu: NVIDIA GeForce RTX 5090
+                gpu_count: 2
+                gpu_nvidia:
+                    - architecture: Blackwell
+                      cudaCores: 21760
+                      memoryTotal: "34190917632"
+                      name: NVIDIA GeForce RTX 5090
+                      uuid: GPU-00d46db1-7b10-b0aa-6d14-2f3cb9c5bff6
+                    - architecture: Blackwell
+                      cudaCores: 21760
+                      memoryTotal: "34190917632"
+                      name: NVIDIA GeForce RTX 5090
+                      uuid: GPU-8bac2ae2-54f2-3865-5f6c-d4c75bd906fd
+                host: maxlab-host-001.ml.cmu.edu
+                memory:
+                    total: "269543395328"
+                os: Linux-6.8.0-136-generic-x86_64-with-glibc2.39
+                program: -m student.wuji_bc.chunk_test
+                python: CPython 3.11.15
+                root: /home/leo/wuji-hands
+                startedAt: "2026-07-28T21:40:03.709359Z"
+                writerId: nvbyz3h3i51w7a2qixue1y58hmjzbx05
+        m: []
+        python_version: 3.11.15
+        t:
+            "1":
+                - 12
+                - 45
+            "2":
+                - 12
+                - 45
+            "3":
+                - 2
+                - 13
+                - 16
+                - 61
+            "4": 3.11.15
+            "5": 0.28.1
+            "12": 0.28.1
+            "13": linux-x86_64
+batch_size:
+    value: 256
+demos_path:
+    value: data/leap_lift_demos.npz
+eval_interval:
+    value: 1000
+horizon:
+    value: 4
+lr:
+    value: 0.0003
+seed:
+    value: 0
+steps:
+    value: 40000

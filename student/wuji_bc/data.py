@@ -22,6 +22,30 @@ def load_demos(path: str) -> dict:
 import jax
 import jax.numpy as jnp
 
+def make_action_chunks(actions, episode_ids, horizon: int):
+    """Stack the next `horizon` actions into one flat target of size H*act_dim.
+
+    Chunks never cross an episode boundary -- a chunk that would run past the
+    end of its episode repeats that episode's last action instead. horizon=1
+    returns `actions` unchanged, so the single-step path is untouched.
+    """
+    if horizon == 1:
+        return actions
+
+    a = np.asarray(actions)
+    eps = np.asarray(episode_ids)
+    n, act_dim = a.shape
+
+    idx = np.arange(n)[:, None] + np.arange(horizon)[None, :]
+    idx = np.clip(idx, 0, n - 1)
+    # -1 marks "past the end of this episode"; the running max then carries the
+    # last in-episode index forward, which is the repeat-last-action padding.
+    idx = np.where(eps[idx] == eps[:, None], idx, -1)
+    idx = np.maximum.accumulate(idx, axis=1)
+
+    return jnp.asarray(a[idx].reshape(n, horizon * act_dim))
+
+
 def sample_batch(dataset: dict, rng, batch_size: int) -> dict:
     """Draw `batch_size` random transitions.
 
@@ -37,7 +61,7 @@ def sample_batch(dataset: dict, rng, batch_size: int) -> dict:
     return subset
 
 
-class Normalizer:
+class ZScoreNormalizer:
     """Per-dimension mean/std normalisation."""
 
     def __init__(self, mean, std):
@@ -45,11 +69,11 @@ class Normalizer:
         self.std = std
 
     @classmethod
-    def fit(cls, x) -> "Normalizer":
+    def fit(cls, x) -> "ZScoreNormalizer":
         """Compute per-dimension statistics from x of shape (N, D)."""
         mean = jnp.mean(x, axis=0)
         std = jnp.sqrt(jnp.var(x, axis=0))
-        return Normalizer(mean, std)
+        return ZScoreNormalizer(mean, std)
 
     def normalize(self, x):
         return (x-self.mean)/self.std
@@ -57,6 +81,27 @@ class Normalizer:
     def denormalize(self, z):
         return self.std * z + self.mean
 
+
+class MinMaxNormalizer:
+    """1st and 99th percentile normalization"""
+
+    def __init__(self, min, max):
+        self.min = min
+        self.max = max
+
+    @classmethod
+    def fit(cls, x):
+        min = jnp.percentile(x, 1, axis=0)
+        max = jnp.percentile(x, 99, axis=0)
+        if max - min is 0:
+            raise Exception("max=min not allowed")
+        return MinMaxNormalizer(min, max)
+
+    def normalize(self, x):
+        return 2*(x-self.min)/(self.max-self.min) - 1 
+    
+    def denormalize(self, z):
+        return (z+1)*(self.max-self.min)/2+self.min
 
 if __name__ == "__main__":
     load_demos("data/leap_lift_demos.npz")

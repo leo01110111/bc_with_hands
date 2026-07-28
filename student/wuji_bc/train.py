@@ -1,24 +1,28 @@
 """L06 + L08 -- the training loop."""
 import jax
 import optax
+import flax.serialization as fs
 from flax.training import train_state
-from .nets import VelocityMLP
+from .nets import make_net
 from .flow import flow_bc_loss
-from .data import load_demos, Normalizer, sample_batch
-import jax.numpy as jnp 
+from .data import load_demos, MinMaxNormalizer, sample_batch, make_action_chunks
+import jax.numpy as jnp
+import numpy as np
+from pathlib import Path
 
-CKPT_DIR = "/home/leo/wuji_bc/checkpoints"
+CKPT_DIR = Path("/home/leo/wuji-hands/checkpoints")
+CKPT_FILE = CKPT_DIR / "ckpt.msgpack"
 
 
-def create_train_state(rng, obs_dim: int, act_dim: int, lr: float = 3e-4):
+def create_train_state(rng, obs_dim: int, act_dim: int, lr: float = 3e-4, arch: str = "mlp"):
     """Build the network, its parameters, and an Adam optimiser."""
     key1, key2 = jax.random.split(rng)
-    model = VelocityMLP(act_dim)
+    model = make_net(arch, act_dim)
     variables = model.init(key1, jax.random.normal(key2, (1, obs_dim)), jax.random.normal(key2, (1, act_dim)), jnp.array([[1]]))
     tx = optax.adam(lr)
     state = train_state.TrainState.create(
-        apply_fn = model.apply,
-        params=variables,
+        apply_fn = lambda params, *args: model.apply({'params': params}, *args),
+        params=variables['params'],
         tx=tx)
     return state
 
@@ -29,18 +33,46 @@ def update_step(state, batch, rng):
     state = state.apply_gradients(grads=grad)
     return (state, {'loss': loss})
 
+@jax.jit
+def eval_step(state, batch, rng):
+    loss = flow_bc_loss(state.params, state.apply_fn, batch, rng)
+    return loss
 
-def train(steps: int = 40_000, batch_size: int = 256, seed: int = 0, **kwargs) -> dict:
+def train(steps: int = 40_000, eval_interval: int = 1000, batch_size: int = 256, seed: int = 0,
+          horizon: int = 1, demos_path: str = "data/leap_lift_demos.npz", arch: str = "mlp",
+          ckpt_file=None, wandb_project: str | None = None, wandb_run_name: str | None = None,
+          log_interval: int = 100, **kwargs) -> dict:
     """Train on the real demos and save the params.
 
-    Returns {'state': ..., 'val_loss': float}.
+    Returns {'state': ..., 'final_train_loss': float, 'final_val_loss': float}.
 
     Hold out whole EPISODES for validation, not random transitions. Save the
     normaliser statistics next to the params -- level 9 needs them.
+
+    `horizon` > 1 turns on action chunking: the net predicts the next H actions
+    as one H*act_dim vector. horizon=1 (the default) is the single-step policy
+    and is completely unaffected by the chunking path.
+
+    `arch` picks the velocity field: 'mlp' (concat obs, x_t, t) or 'adaln'
+    (t enters every block as adaLN-Zero modulation). It is saved in the
+    checkpoint so rollout rebuilds the matching network.
+
+    Pass `wandb_project` to log losses and upload the checkpoint as an artifact;
+    with it unset nothing touches the network.
     """
-    demos = load_demos("data/leap_lift_demos.npz")
+    run = None
+    if wandb_project is not None:
+        import wandb
+        run = wandb.init(project=wandb_project, name=wandb_run_name, config={
+            'steps': steps, 'batch_size': batch_size, 'seed': seed, 'horizon': horizon,
+            'lr': 3e-4, 'demos_path': demos_path, 'eval_interval': eval_interval, 'arch': arch,
+        })
+
+    demos = load_demos(demos_path)
 
     episode_ids = demos['episode_ids']
+    # Chunk before the split so a chunk never spans two episodes.
+    demos['actions'] = make_action_chunks(demos['actions'], episode_ids, horizon)
     unique_eps = jnp.unique(episode_ids)
     rng = jax.random.key(seed)
     rng, key1 = jax.random.split(rng)
@@ -54,7 +86,7 @@ def train(steps: int = 40_000, batch_size: int = 256, seed: int = 0, **kwargs) -
     train_set = {k: v[train_mask] for k, v in demos.items()}
     val_set = {k: v[val_mask] for k, v in demos.items()}
 
-    obs_normalizer = Normalizer.fit(train_set["observations"])
+    obs_normalizer = MinMaxNormalizer.fit(train_set["observations"])
     train_set['observations'] = obs_normalizer.normalize(train_set['observations'])
     val_set['observations'] = obs_normalizer.normalize(val_set['observations'])
 
@@ -62,14 +94,69 @@ def train(steps: int = 40_000, batch_size: int = 256, seed: int = 0, **kwargs) -
     act_dim = train_set['actions'].shape[-1]
     rng, key2 = jax.random.split(rng)
     state = create_train_state(key2, obs_dim=obs_dim, act_dim=act_dim, lr=3e-4)
-    final_loss = None
+
+    rng, val_key, val_batch_key = jax.random.split(rng, 3)
+    val_batch = sample_batch(val_set, val_batch_key, batch_size)
+    final_train_loss = None
+    val_loss = None
+
     for step in range(steps):
         rng, batch_key, step_key = jax.random.split(rng, 3)
-        batch = sample_batch(train_set, batch_key, batch_size)
-        state, info = update_step(state, batch, step_key)
-        if step % 100 == 0:
-            print(f"Train Loss {info['loss']}")
-            #eval function
-        final_loss = info['loss']
 
-    return {'state': state, 'loss': final_loss}
+        batch = sample_batch(train_set, batch_key, batch_size)
+        
+        state, info = update_step(state, batch, step_key)
+        
+        if step % eval_interval == 0:
+            val_loss = eval_step(state, val_batch, val_key)
+            print(f"step {step}  train {info['loss']:.4f}  val {val_loss:.4f}")
+            if run is not None:
+                run.log({'val_loss': float(val_loss)}, step=step)
+
+        # float() blocks until the step is done, so only do it when logging.
+        if run is not None and step % log_interval == 0:
+            run.log({'train_loss': float(info['loss'])}, step=step)
+
+        final_train_loss = info['loss']
+
+    val_loss = eval_step(state, val_batch, val_key)
+    print(f"step {step}  train {final_train_loss:.4f}  val {val_loss:.4f}")
+    if run is not None:
+        run.log({'train_loss': float(final_train_loss), 'val_loss': float(val_loss)}, step=step)
+
+    # Params and the normaliser go in ONE file: written together, they cannot
+    # drift apart the way two files can (params from run B, stats from run A
+    # still have matching shapes and just quietly perform worse). L09 loads it.
+    out = Path(ckpt_file) if ckpt_file is not None else CKPT_FILE
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(fs.msgpack_serialize({
+        'params': state.params,
+        'obs_min': np.asarray(obs_normalizer.min),
+        'obs_max': np.asarray(obs_normalizer.max),
+        'obs_dim': np.int32(obs_dim),
+        'act_dim': np.int32(act_dim),      # H * env action dim
+        'horizon': np.int32(horizon),
+    }))
+
+    if run is not None:
+        artifact = wandb.Artifact(f"ckpt-{run.id}", type="model",
+                                  metadata={'horizon': horizon, 'val_loss': float(val_loss)})
+        artifact.add_file(str(out))
+        run.log_artifact(artifact)
+        run.finish()
+
+    return {'state': state, 'train_loss': final_train_loss, 'val_loss': float(val_loss)}
+
+"""
+train does the following:
+- loads data from a path
+- creates a train and val set
+- normalize obs 
+- creates a train state
+- makes a val batch
+- training loop:
+    - samples batch
+    - updatss the state with the batch
+    - does an eval every interval
+- returns state and normalization statistics 
+"""

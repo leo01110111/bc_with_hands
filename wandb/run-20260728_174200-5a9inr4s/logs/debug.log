@@ -1,0 +1,21 @@
+2026-07-28 17:42:00,224 INFO    MainThread:523783 [wandb_init.py:setup_run_log_directory():729] Logging user logs to /home/leo/wuji-hands/wandb/run-20260728_174200-5a9inr4s/logs/debug.log
+2026-07-28 17:42:00,224 INFO    MainThread:523783 [wandb_init.py:setup_run_log_directory():730] Logging internal logs to /home/leo/wuji-hands/wandb/run-20260728_174200-5a9inr4s/logs/debug-internal.log
+2026-07-28 17:42:00,224 INFO    MainThread:523783 [wandb_init.py:init():772] calling init triggers
+2026-07-28 17:42:00,224 INFO    MainThread:523783 [wandb_init.py:init():777] wandb.init called with sweep_config: {}
+config: {'steps': 40000, 'batch_size': 256, 'seed': 0, 'horizon': 8, 'lr': 0.0003, 'demos_path': 'data/leap_lift_demos.npz', 'eval_interval': 1000, '_wandb': {}}
+2026-07-28 17:42:00,224 INFO    MainThread:523783 [wandb_init.py:init():820] starting backend
+2026-07-28 17:42:00,224 INFO    MainThread:523783 [wandb_init.py:init():835] sending inform_init request
+2026-07-28 17:42:00,333 INFO    MainThread:523783 [wandb_init.py:init():840] backend started and connected
+2026-07-28 17:42:00,334 INFO    MainThread:523783 [wandb_init.py:init():910] updated telemetry
+2026-07-28 17:42:00,339 INFO    MainThread:523783 [wandb_init.py:init():933] communicating run to backend with 90.0 second timeout
+2026-07-28 17:42:09,348 INFO    MainThread:523783 [wandb_init.py:init():978] starting run threads in backend
+2026-07-28 17:42:09,368 INFO    MainThread:523783 [wandb_run.py:_console_start():2621] atexit reg
+2026-07-28 17:42:09,368 INFO    MainThread:523783 [wandb_run.py:_redirect():2471] redirect: wrap_raw
+2026-07-28 17:42:09,368 INFO    MainThread:523783 [wandb_run.py:_redirect():2540] Wrapping output streams.
+2026-07-28 17:42:09,368 INFO    MainThread:523783 [wandb_run.py:_redirect():2563] Redirects installed.
+2026-07-28 17:42:09,369 INFO    MainThread:523783 [wandb_init.py:init():1016] run started, returning control to user process
+2026-07-28 17:42:59,118 INFO    MainThread:523783 [wandb_run.py:_finish():2383] finishing run leokswang-carnegie-mellon-university/chunk_ablation/5a9inr4s
+2026-07-28 17:42:59,118 INFO    MainThread:523783 [wandb_run.py:_atexit_cleanup():2588] got exitcode: 0
+2026-07-28 17:42:59,119 INFO    MainThread:523783 [wandb_run.py:_restore():2570] restore
+2026-07-28 17:42:59,119 INFO    MainThread:523783 [wandb_run.py:_restore():2576] restore done
+2026-07-28 17:43:06,950 INFO    MainThread:523783 [wandb_run.py:_footer_sync_info():3993] logging synced files
