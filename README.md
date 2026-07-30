@@ -46,6 +46,19 @@ blueprint, so `uv sync` rebuilds the environment. The demonstrations and the
 trained checkpoints are small enough to ship in the repo. The two big vision
 arrays are not; see below.
 
+## The datasets
+
+```
+leap_lift_demos.npz    1500 eps, state only          -> the ladder
+leap_lift_pixels.npz  |  300 eps, states + actions   |
+leap_lift_frames.npy  |  300 eps, raw images         |- the vision policy
+leap_lift_dinov3_s.npy   300 eps, DINOv3 features    |
+```
+
+`leap_lift_pixels.npz` holds no pixels despite the name — it is the states and
+actions for the pixel run, and row `i` lines up with row `i` of `frames.npy` and
+of the features. The three vision files are one dataset in three pieces.
+
 ## Large artifacts
 
 Everything in the repo is under 25 MB. The frame and feature arrays are 15 GiB
