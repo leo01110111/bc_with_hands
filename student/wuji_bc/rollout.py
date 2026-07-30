@@ -6,12 +6,13 @@ import jax
 import jax.numpy as jnp
 import flax.serialization as fs
 
-from .nets import make_net
-from .data import MinMaxNormalizer
+from .nets import make_net, VisionPolicy
+from .data import MinMaxNormalizer, PROPRIO_IDX
 from .flow import sample_actions
 
 CKPT_DIR = Path("/home/leo/wuji-hands/checkpoints")
 CKPT_FILE = CKPT_DIR / "ckpt.msgpack"
+VISION_CKPT_FILE = CKPT_DIR / "ckpt_vision.msgpack"
 
 # collect() resets with `collect_seed * 100_000 + attempt`, so the demonstrated
 # initial conditions are small non-negative ints (0..~1538 for our dataset).
@@ -102,6 +103,88 @@ def evaluate_policy(n_episodes: int = 20, seed: int = 0, flow_steps: int = 10,
             "horizon": horizon,
             "chunk_mode": chunk_mode if horizon > 1 else "n/a",
             "deterministic": deterministic}
+
+
+def load_vision_policy(checkpoint_file=VISION_CKPT_FILE):
+    """Params + apply_fn + normaliser for a train_vision() checkpoint."""
+    ckpt = fs.msgpack_restore(Path(checkpoint_file).read_bytes())
+
+    obs_norm = MinMaxNormalizer(jnp.asarray(ckpt["obs_min"]), jnp.asarray(ckpt["obs_max"]))
+    act_dim = int(ckpt["act_dim"])
+    model = VisionPolicy(action_dim=act_dim,
+                         arch=ckpt.get("arch", "adaln"),
+                         vision_dim=int(ckpt["vision_dim"]))
+
+    def apply_fn(p, obs, x_t, t):
+        return model.apply({"params": p}, obs, x_t, t)
+
+    return {"params": ckpt["params"], "apply_fn": apply_fn, "obs_norm": obs_norm,
+            "act_dim": act_dim, "horizon": int(ckpt.get("horizon", 1)),
+            "proprio_only": bool(ckpt["proprio_only"])}
+
+
+def evaluate_vision_policy(n_episodes: int = 20, seed: int = 0, flow_steps: int = 10,
+                           video_path: str | None = None,
+                           checkpoint_file=VISION_CKPT_FILE, deterministic: bool = True,
+                           chunk_mode: str = "open_loop", encoder_size: str = "s",
+                           encoder_device: str = "cuda", video_episodes: int = 1) -> dict:
+    """Roll out the pixel-conditioned policy, encoding both cameras every step.
+
+    The backbone runs in torch inside the loop; only the flow sampler is jitted.
+    """
+    from wuji_hands.leap_lift import CONTROL_DT, LeapLiftEnv
+
+    from .collect_pixels import CAMERAS, RENDER_SIZE
+    from .encoder import DINOV3
+
+    p = load_vision_policy(checkpoint_file)
+    params, apply_fn, obs_norm = p["params"], p["apply_fn"], p["obs_norm"]
+    act_dim, horizon = p["act_dim"], p["horizon"]
+    env_act_dim = act_dim // horizon
+
+    enc = DINOV3(size=encoder_size, device=encoder_device).load()
+
+    @jax.jit
+    def act(params, obs, rng):
+        noises = jnp.zeros((1, act_dim)) if deterministic else None
+        return sample_actions(params, apply_fn, obs, rng, flow_steps, act_dim, noises)
+
+    env = LeapLiftEnv(seed=seed)
+    rng = jax.random.key(seed)
+    frames, successes = [], 0
+
+    for ep in range(n_episodes):
+        obs = env.reset(seed=EVAL_SEED_BASE + seed + ep)
+        done, info = False, {}
+        pending = []
+        while not done:
+            if not pending:
+                views = np.stack([env.render(RENDER_SIZE, RENDER_SIZE, c) for c in CAMERAS])
+                tokens = jnp.asarray(enc.infer(views))[None]
+                proprio = jnp.asarray(obs)[None, :]
+                if p["proprio_only"]:
+                    proprio = proprio[:, PROPRIO_IDX]
+                rng, akey = jax.random.split(rng)
+                chunk = np.asarray(act(params, {
+                    "proprio": obs_norm.normalize(proprio), "tokens": tokens,
+                }, akey))[0].reshape(horizon, env_act_dim)
+                pending = list(chunk) if chunk_mode == "open_loop" else [chunk[0]]
+            obs, _, done, info = env.step(pending.pop(0))
+            if video_path is not None and ep < video_episodes:
+                # env.render caches its Renderer at the first size asked for, which
+                # the encoding path above has already fixed at RENDER_SIZE.
+                frames.append(np.concatenate(
+                    [env.render(RENDER_SIZE, RENDER_SIZE, c) for c in CAMERAS], axis=1))
+        successes += bool(info["success"])
+
+    if video_path is not None and frames:
+        import imageio
+        imageio.mimsave(video_path, frames, fps=int(round(1.0 / CONTROL_DT)))
+
+    env.close()
+    return {"success_rate": successes / n_episodes, "n_episodes": n_episodes,
+            "flow_steps": flow_steps, "horizon": horizon,
+            "chunk_mode": chunk_mode if horizon > 1 else "n/a"}
 
 
 def flow_steps_sweep(steps_list=(1, 2, 4, 10), n_episodes: int = 20, seed: int = 1234) -> dict:

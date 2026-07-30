@@ -106,6 +106,71 @@ class AdaLNVelocityMLP(nn.Module):
         return nn.Dense(self.action_dim, kernel_init=zeros)(h)
 
 
+class TokenPool(nn.Module):
+    """Frozen DINOv3 tokens -> one conditioning vector.
+
+    Three readouts are concatenated: spatial-softmax keypoints (where things
+    are), attention-pooled content (what they are) and CLS (global summary).
+
+    Attributes:
+        out_dim: width of the vector concatenated onto proprioception
+        num_queries: learned queries attending over the patch grid
+        num_keypoints: spatial-softmax channels per camera
+    """
+
+    out_dim: int = 128
+    num_queries: int = 4
+    num_keypoints: int = 16
+
+    @nn.compact
+    def __call__(self, tokens):
+        """
+        tokens (B, n_cams, 1 + P, D)   index 0 of each camera is CLS
+        ->     (B, out_dim)
+        """
+        b, n_cams, t, d = tokens.shape
+        p = t - 1
+        g = int(round(p ** 0.5))
+        tokens = nn.LayerNorm()(tokens)
+        cls, patches = tokens[:, :, 0], tokens[:, :, 1:]
+
+        # Expected patch coordinate per channel. Attention pooling alone returns a
+        # weighted average of patch *content*, which carries no position, so
+        # without this the grid's spatial layout is thrown away.
+        heat = nn.softmax(nn.Dense(self.num_keypoints)(patches), axis=2)
+        coord = jnp.linspace(-1.0, 1.0, g)
+        gy, gx = (a.reshape(-1) for a in jnp.meshgrid(coord, coord, indexing='ij'))
+        keypoints = jnp.stack([jnp.einsum('bcpk,p->bck', heat, gx),
+                               jnp.einsum('bcpk,p->bck', heat, gy)], -1).reshape(b, -1)
+
+        pos = self.param('pos_embed', nn.initializers.normal(0.02), (1, n_cams, p, d))
+        x = (patches + pos).reshape(b, n_cams * p, d)
+        q = self.param('query', nn.initializers.normal(0.02), (self.num_queries, d))
+        attn = nn.softmax(jnp.einsum('qd,bnd->bqn', q, x) / jnp.sqrt(d), axis=-1)
+        pooled = jnp.einsum('bqn,bnd->bqd', attn, x).reshape(b, self.num_queries * d)
+
+        h = jnp.concat([keypoints, pooled, cls.reshape(b, n_cams * d)], axis=-1)
+        return nn.LayerNorm()(nn.Dense(self.out_dim)(h))
+
+
+class VisionPolicy(nn.Module):
+    """Velocity field conditioned on pooled image tokens plus proprioception.
+
+    `observations` is a dict of {'tokens', 'proprio'} so it stays one pytree
+    argument and flow.py needs no changes.
+    """
+
+    action_dim: int
+    arch: str = 'adaln'
+    vision_dim: int = 128
+
+    @nn.compact
+    def __call__(self, observations, x_t, t):
+        v = TokenPool(out_dim=self.vision_dim)(observations['tokens'])
+        obs = jnp.concat([observations['proprio'], v], axis=-1)
+        return ARCHS[self.arch](self.action_dim)(obs, x_t, t)
+
+
 ARCHS = {
     'mlp': VelocityMLP,
     'adaln': AdaLNVelocityMLP,

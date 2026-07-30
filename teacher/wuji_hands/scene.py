@@ -45,6 +45,16 @@ N_WRIST_JOINTS = 4
 N_ACT = N_HAND_JOINTS + N_WRIST_JOINTS
 
 
+def _look_at(pos, target, up=(0.0, 0.0, 1.0)) -> list:
+    """MuJoCo camera `xyaxes` (right axis, then up axis) aiming pos at target."""
+    pos, target, up = np.asarray(pos), np.asarray(target), np.asarray(up)
+    forward = target - pos
+    forward = forward / np.linalg.norm(forward)
+    right = np.cross(forward, up)
+    right = right / np.linalg.norm(right)
+    return list(right) + list(np.cross(right, forward))
+
+
 def build_spec() -> mujoco.MjSpec:
     """Return the full scene spec: table + cube + wrist-mounted LEAP hand."""
     spec = mujoco.MjSpec()
@@ -105,6 +115,15 @@ def _add_visuals(spec: mujoco.MjSpec) -> None:
         name="track",
         pos=[0.45, -0.45, 0.42],
         xyaxes=[0.7, 0.7, 0.0, -0.28, 0.28, 0.92],
+    )
+    # `track` pulled in for the vision policy. Aimed at mid-hand height, not at
+    # the cube: the hand spans z 0.10-0.28 and a lower target clips it off the
+    # top of the frame during the lift.
+    _POLICY_CAM_POS = [0.271, -0.271, 0.423]
+    spec.worldbody.add_camera(
+        name="policy",
+        pos=_POLICY_CAM_POS,
+        xyaxes=_look_at(_POLICY_CAM_POS, [0.0, 0.0, 0.17]),
     )
 
 
@@ -174,6 +193,19 @@ def _add_hand(spec: mujoco.MjSpec) -> None:
         mass=0.2,
     )
     wrist.add_site(name="wrist_center", size=[0.004], rgba=[0, 0, 0, 0])
+
+    # Stood off past the fingertips; closer mounts end up inside the hand's own
+    # bulk with the palm mount filling the frame.
+    _WRIST_CAM_POS = [0.20, -0.02, 0.01]
+    wrist.add_camera(
+        name="wrist",
+        pos=_WRIST_CAM_POS,
+        xyaxes=_look_at(
+            _WRIST_CAM_POS,
+            [HAND_ATTACH_POS[0], HAND_ATTACH_POS[1], -GRASP_OFFSET_Z],
+        ),
+        fovy=55.0,
+    )
 
     frame = wrist.add_frame(pos=list(HAND_ATTACH_POS), quat=list(HAND_ATTACH_QUAT))
     spec.attach(hand, prefix="", frame=frame)

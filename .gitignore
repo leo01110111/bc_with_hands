@@ -1,3 +1,12 @@
 __pycache__/
 *.pyc
 
+# pyproject.toml and uv.lock are tracked; recreate with `uv sync`
+.venv*/
+
+# rendered rollouts, regenerate with chunk_test.py / demo_video.py
+videos/
+
+# frames and their DINOv3 features, ~15 GB; see README for the Hub path
+data/leap_lift_frames.npy
+data/leap_lift_dinov3_s.npy

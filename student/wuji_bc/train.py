@@ -3,9 +3,10 @@ import jax
 import optax
 import flax.serialization as fs
 from flax.training import train_state
-from .nets import make_net
+from .nets import make_net, VisionPolicy
 from .flow import flow_bc_loss
-from .data import load_demos, MinMaxNormalizer, sample_batch, make_action_chunks
+from .data import (load_demos, MinMaxNormalizer, sample_batch, make_action_chunks,
+                   load_pixel_demos, sample_pixel_batch)
 import jax.numpy as jnp
 import numpy as np
 from pathlib import Path
@@ -25,6 +26,20 @@ def create_train_state(rng, obs_dim: int, act_dim: int, lr: float = 3e-4, arch: 
         params=variables['params'],
         tx=tx)
     return state
+
+def create_vision_train_state(rng, proprio_dim: int, act_dim: int, token_shape,
+                              lr: float = 3e-4, arch: str = "adaln", vision_dim: int = 128):
+    """Train state for VisionPolicy. token_shape is (n_cams, 1 + n_patches, embed_dim)."""
+    key1, key2 = jax.random.split(rng)
+    model = VisionPolicy(action_dim=act_dim, arch=arch, vision_dim=vision_dim)
+    obs = {'proprio': jax.random.normal(key2, (1, proprio_dim)),
+           'tokens': jax.random.normal(key2, (1,) + tuple(token_shape))}
+    variables = model.init(key1, obs, jax.random.normal(key2, (1, act_dim)), jnp.zeros((1, 1)))
+    return train_state.TrainState.create(
+        apply_fn=lambda params, *args: model.apply({'params': params}, *args),
+        params=variables['params'],
+        tx=optax.adam(lr))
+
 
 @jax.jit
 def update_step(state, batch, rng):
@@ -147,6 +162,102 @@ def train(steps: int = 40_000, eval_interval: int = 1000, batch_size: int = 256,
         run.finish()
 
     return {'state': state, 'train_loss': final_train_loss, 'val_loss': float(val_loss)}
+
+def train_vision(steps: int = 40_000, eval_interval: int = 1000, batch_size: int = 128,
+                 seed: int = 0, horizon: int = 1, arch: str = "adaln", vision_dim: int = 128,
+                 proprio_only: bool = True, lr: float = 3e-4,
+                 demos_path: str = "data/leap_lift_pixels.npz",
+                 features_path: str = "data/leap_lift_dinov3_s.npy",
+                 ckpt_file=None, wandb_project: str | None = None,
+                 wandb_run_name: str | None = None, log_interval: int = 100) -> dict:
+    """Same loop as train(), conditioned on cached DINOv3 tokens as well as state.
+
+    Only TokenPool and the velocity field train; the backbone was frozen when
+    the features were cached.
+    """
+    run = None
+    if wandb_project is not None:
+        import wandb
+        run = wandb.init(project=wandb_project, name=wandb_run_name, config={
+            'steps': steps, 'batch_size': batch_size, 'seed': seed, 'horizon': horizon,
+            'lr': lr, 'arch': arch, 'vision_dim': vision_dim, 'proprio_only': proprio_only,
+            'features_path': features_path,
+        })
+
+    demos = load_pixel_demos(demos_path, features_path, proprio_only=proprio_only)
+
+    episode_ids = demos['episode_ids']
+    demos['actions'] = make_action_chunks(demos['actions'], episode_ids, horizon)
+
+    rng = jax.random.key(seed)
+    rng, key1 = jax.random.split(rng)
+    unique_eps = jax.random.permutation(key1, jnp.unique(episode_ids))
+    n_val = max(1, int(0.1 * unique_eps.shape[0]))
+    val_mask = jnp.isin(episode_ids, unique_eps[:n_val])
+    train_set = {k: v[~val_mask] for k, v in demos.items()}
+    val_set = {k: v[val_mask] for k, v in demos.items()}
+
+    # Tokens are left alone -- TokenPool starts with a LayerNorm.
+    obs_normalizer = MinMaxNormalizer.fit(train_set['observations'])
+    for s in (train_set, val_set):
+        s['observations'] = obs_normalizer.normalize(s['observations'])
+
+    proprio_dim = train_set['observations'].shape[-1]
+    act_dim = train_set['actions'].shape[-1]
+    token_shape = train_set['tokens'].shape[1:]
+
+    rng, key2 = jax.random.split(rng)
+    state = create_vision_train_state(key2, proprio_dim, act_dim, token_shape,
+                                      lr=lr, arch=arch, vision_dim=vision_dim)
+    print(f"proprio {proprio_dim}  tokens {token_shape}  act {act_dim}  "
+          f"params {sum(x.size for x in jax.tree.leaves(state.params)):,}", flush=True)
+
+    rng, val_key, val_batch_key = jax.random.split(rng, 3)
+    val_batch = sample_pixel_batch(val_set, val_batch_key, batch_size)
+    final_train_loss = val_loss = None
+
+    for step in range(steps):
+        rng, batch_key, step_key = jax.random.split(rng, 3)
+        batch = sample_pixel_batch(train_set, batch_key, batch_size)
+        state, info = update_step(state, batch, step_key)
+
+        if step % eval_interval == 0:
+            val_loss = eval_step(state, val_batch, val_key)
+            print(f"step {step}  train {info['loss']:.4f}  val {val_loss:.4f}", flush=True)
+            if run is not None:
+                run.log({'val_loss': float(val_loss)}, step=step)
+        if run is not None and step % log_interval == 0:
+            run.log({'train_loss': float(info['loss'])}, step=step)
+        final_train_loss = info['loss']
+
+    val_loss = eval_step(state, val_batch, val_key)
+    print(f"step {steps - 1}  train {final_train_loss:.4f}  val {val_loss:.4f}", flush=True)
+
+    out = Path(ckpt_file) if ckpt_file is not None else CKPT_DIR / "ckpt_vision.msgpack"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(fs.msgpack_serialize({
+        'params': state.params,
+        'obs_min': np.asarray(obs_normalizer.min),
+        'obs_max': np.asarray(obs_normalizer.max),
+        'proprio_dim': np.int32(proprio_dim),
+        'act_dim': np.int32(act_dim),
+        'horizon': np.int32(horizon),
+        'arch': arch,
+        'vision_dim': np.int32(vision_dim),
+        'proprio_only': proprio_only,
+        'token_shape': np.asarray(token_shape, dtype=np.int32),
+    }))
+    print(f"wrote {out}", flush=True)
+
+    if run is not None:
+        artifact = wandb.Artifact(f"ckpt-{run.id}", type="model",
+                                  metadata={'horizon': horizon, 'val_loss': float(val_loss)})
+        artifact.add_file(str(out))
+        run.log_artifact(artifact)
+        run.finish()
+
+    return {'state': state, 'train_loss': final_train_loss, 'val_loss': float(val_loss)}
+
 
 """
 train does the following:

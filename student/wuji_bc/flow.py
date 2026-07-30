@@ -63,8 +63,10 @@ def sample_actions(params, apply_fn, observations, rng, flow_steps, act_dim, noi
             x <- x + apply_fn(params, obs, x, t) * (1 / flow_steps)
         return clip(x, -1, 1)
     """
-    x = jax.random.normal(rng, (observations.shape[0], act_dim))
-    x = noises if noises is not None else jax.random.normal(rng, (observations.shape[0], act_dim))
+    # observations may be a dict (the vision policy), so take the batch size off
+    # any leaf rather than off .shape.
+    batch = jax.tree.leaves(observations)[0].shape[0]
+    x = noises if noises is not None else jax.random.normal(rng, (batch, act_dim))
     for i in range(flow_steps):
         t = jnp.full((x.shape[0],1), i/flow_steps)
         x = x + apply_fn(params, observations, x, t) * (1 / flow_steps)

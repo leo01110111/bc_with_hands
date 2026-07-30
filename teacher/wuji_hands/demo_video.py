@@ -5,7 +5,7 @@ import numpy as np
 from wuji_hands.expert import ScriptedExpert
 from wuji_hands.leap_lift import EPISODE_STEPS, LeapLiftEnv
 
-OUT = "/home/leo/wuji-hands/expert.mp4"
+OUT = "/home/leo/wuji-hands/data/expert.mp4"
 
 
 def main(n_episodes: int = 3, noise: float = 0.35, seed: int = 5, out: str = OUT) -> str:

@@ -22,6 +22,42 @@ def load_demos(path: str) -> dict:
 import jax
 import jax.numpy as jnp
 
+# obs is [hand(16) | wrist(4) | cube_pos(3) | cube_quat(4) | cube-grasp(3) | closure(1)].
+# Indices 20:30 are the cube pose the vision policy is supposed to read off pixels.
+PROPRIO_IDX = np.r_[0:20, 30]
+
+
+def load_pixel_demos(npz_path: str, features_path: str, proprio_only: bool = True) -> dict:
+    """Demos plus cached DINOv3 tokens, with the tokens resident on device.
+
+    proprio_only drops the cube terms from the observation, so the only route to
+    cube pose is the image.
+    """
+    demos = {k: jnp.asarray(v) for k, v in np.load(npz_path).items()}
+    if proprio_only:
+        demos['observations'] = demos['observations'][:, PROPRIO_IDX]
+
+    feats = np.load(features_path)
+    if len(feats) != len(demos['actions']):
+        raise ValueError(f"{len(feats)} cached frames vs {len(demos['actions'])} transitions")
+    demos['tokens'] = jnp.asarray(feats)
+    return demos
+
+
+def sample_pixel_batch(dataset: dict, rng, batch_size: int) -> dict:
+    """Batch with observations as a {'proprio', 'tokens'} pytree."""
+    n = dataset['actions'].shape[0]
+    idx = jax.random.randint(rng, (batch_size,), 0, n)
+    return {
+        'actions': dataset['actions'][idx],
+        'episode_ids': dataset['episode_ids'][idx],
+        'observations': {
+            'proprio': dataset['observations'][idx],
+            'tokens': dataset['tokens'][idx].astype(jnp.float32),
+        },
+    }
+
+
 def make_action_chunks(actions, episode_ids, horizon: int):
     """Stack the next `horizon` actions into one flat target of size H*act_dim.
 
