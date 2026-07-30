@@ -23,7 +23,7 @@ teacher/katas/        the level definitions and the check runner
 student/wuji_bc/      the worksheets -- the six files you fill in
 data/                 demonstrations and the expert video
 checkpoints/          trained policies, small enough to keep in git
-videos/               rendered rollouts (gitignored, regenerate them)
+videos/               rendered rollouts
 ```
 
 The split is the point. Everything under `teacher/` is scaffolding: read it if
