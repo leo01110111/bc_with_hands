@@ -21,7 +21,9 @@ make level LEVEL=4      # run just one level
 teacher/wuji_hands/   the simulation, the scripted expert, demo collection
 teacher/katas/        the level definitions and the check runner
 student/wuji_bc/      the worksheets -- the six files you fill in
-data/                 generated demonstrations (make demos, gitignored)
+data/                 demonstrations and the expert video
+checkpoints/          trained policies, small enough to keep in git
+videos/               rendered rollouts (gitignored, regenerate them)
 ```
 
 The split is the point. Everything under `teacher/` is scaffolding: read it if
@@ -39,8 +41,35 @@ The runner imports `wuji_bc.data`, `wuji_bc.flow` and so on out of `student/`.
 Point it somewhere else with `make check STUDENT=/path/to/another/checkout` if
 you want to keep several attempts side by side.
 
-Nothing else lives here — no vendored dependencies, no checkpoints, no data.
-Just the kata.
+No vendored dependencies and no venvs — `pyproject.toml` and `uv.lock` are the
+blueprint, so `uv sync` rebuilds the environment. The demonstrations and the
+trained checkpoints are small enough to ship in the repo. The two big vision
+arrays are not; see below.
+
+## Large artifacts
+
+Everything in the repo is under 25 MB. The frame and feature arrays are 15 GiB
+together, which is past what GitHub will accept, so they live on the Hub:
+
+```bash
+hf download leokswang/wuji-hands-leap-lift --repo-type dataset \
+    --local-dir data --include '*.npy'
+```
+
+| file | shape | dtype | size |
+|---|---|---|---|
+| `data/leap_lift_frames.npy` | (27000, 2, 224, 224, 3) | uint8 | 7.57 GiB |
+| `data/leap_lift_dinov3_s.npy` | (27000, 2, 197, 384) | float16 | 7.61 GiB |
+
+Both are derived, so downloading is a convenience rather than a requirement:
+
+```bash
+.venv/bin/python -m wuji_bc.collect_pixels              # -> leap_lift_frames.npy
+.venv-vision/bin/python -m wuji_bc.cache_features       # -> leap_lift_dinov3_s.npy
+```
+
+The second one runs under `.venv-vision` — torch and DINOv3, kept apart from the
+jax venv on purpose.
 
 ## The ladder
 
